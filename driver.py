@@ -14,12 +14,14 @@ driver_path = ""
 proxy_url = ""
 debug = False
 options = webdriver.ChromeOptions()
-
+first_page = 0
+last_page = 0
 db = None
+use_proxy = True
 
 
 def load_config():
-    global username, password, debug, driver_path, proxy_url, db
+    global username, password, debug, driver_path, proxy_url, db, first_page, last_page, use_proxy
     print("Loading config")
     cfg.read('config.ini')
     username = cfg['OU']['username']
@@ -28,6 +30,9 @@ def load_config():
     driver_path = cfg['Default']['driver_path']
     proxy_url = cfg['Default']['proxy_url']
     location = cfg['DB']['location']
+    first_page = int(cfg['LexisNexis']['first_page'])
+    last_page = int(cfg['LexisNexis']['last_page'])
+    use_proxy = cfg.getboolean('OU', 'proxy')
     db = corpus_db.DBHandler(destination=location)
     if not debug:
         options.add_argument('headless')
@@ -47,9 +52,21 @@ def proxy_login():
     print(f"Proxy logged in: Process took {time.time() - ts} seconds.")
 
 
+def non_proxy_login():
+    global driver
+    print("Starting direct access.")
+    ts = time.time()
+    driver = webdriver.Chrome(driver_path)
+    driver.get(proxy_url)
+    print(f"Direct access: Process took {time.time() - ts} seconds.")
+
+
 def next_page():
-    elt = driver.find_elements_by_class_name("la-TriangleRight")[17]
-    elt.click()
+    elts = []
+    while len(elts) < 18:
+        elts = driver.find_elements_by_class_name("la-TriangleRight")
+    driver.find_elements_by_class_name("la-TriangleRight")[17].click()
+    time.sleep(2)
 
 
 def end_of_pages():
@@ -95,17 +112,24 @@ def fetch_text(i, page_num):
 def initial_pull():
     page_num = 0
     driver.get("https://advance-lexis-com.ezproxy.lib.ou.edu/search/?pdmfid=1516831&crid=7323c5c3-43d1-4a2a-b491-6602edebfdec&pdsearchterms=last+laughs&pdstartin=hlct%3A1%3A1&pdtypeofsearch=searchboxclick&pdsearchtype=SearchBox&pdqttype=and&pdsf=MTA1MzI4NA~%5Enews~%5EThe%2520Bulletin%27s%2520Frontrunner&pdquerytemplateid=&ecomp=s7x9k&earg=pdsf&prid=e668ab9e-4f9d-4997-9d07-bc17d448dd24")
-    while page_num != 513:
-        for i in range(0, 10):
-            body = fetch_text(i, page_num)
-            db.add(body)
-            print(f"Retrieved corpus for item {page_num * 10 + i}")
-        next_page()
-        page_num = page_num + 1
+    while page_num != last_page+1:
+        if page_num >= first_page-1:
+            for i in range(0, 10):
+                body = fetch_text(i, page_num)
+                db.add(body)
+                print(f"Retrieved corpus for item {page_num * 10 + i}")
+            next_page()
+            page_num = page_num + 1
+        else:
+            driver.execute_script(f"var e = document.getElementsByClassName('pagination')[0].firstElementChild.children[5].firstElementChild; e.setAttribute('data-value', {first_page}); e.click()")
+            page_num = first_page-1
 
 
 if __name__ == "__main__":
     load_config()
-    proxy_login()
+    if use_proxy:
+        proxy_login()
+    else:
+        non_proxy_login()
 
     initial_pull()
